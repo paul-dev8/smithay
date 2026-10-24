@@ -33,6 +33,11 @@ pub struct DataSourceUserData {
     pub(crate) inner: Mutex<SourceMetadata>,
     alive_tracker: AliveTracker,
     display_handle: DisplayHandle,
+    /// Set to true when this source is associated with an xdg_toplevel_drag.
+    /// Per the xdg-toplevel-drag-v1 spec, such sources must not be used for
+    /// wl_data_device.set_selection — doing so raises invalid_source.
+    // athena local change: our xdg-toplevel-drag-v1 marks its source here.
+    pub toplevel_drag_source: std::sync::atomic::AtomicBool,
 }
 
 impl DataSourceUserData {
@@ -41,6 +46,8 @@ impl DataSourceUserData {
             inner: Default::default(),
             alive_tracker: Default::default(),
             display_handle,
+            // athena local change: see the field.
+            toplevel_drag_source: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
