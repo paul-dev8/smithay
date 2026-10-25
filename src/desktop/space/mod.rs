@@ -3,17 +3,17 @@
 
 use crate::{
     backend::renderer::{
+        Color32F, Renderer, Texture,
         damage::{Error as OutputDamageTrackerError, OutputDamageTracker, RenderOutputResult},
         element::{AsRenderElements, RenderElement, Wrap},
-        Color32F, Renderer, Texture,
     },
     output::{Output, OutputModeSource, OutputNoMode},
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Transform},
 };
 #[cfg(feature = "wayland_frontend")]
 use crate::{
-    backend::renderer::{element::surface::WaylandSurfaceRenderElement, ImportAll},
-    desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType},
+    backend::renderer::{ImportAll, element::surface::WaylandSurfaceRenderElement},
+    desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output},
     wayland::shell::wlr_layer::Layer,
 };
 use std::{collections::HashMap, fmt};
@@ -224,8 +224,7 @@ impl<E: SpaceElement + PartialEq> Space<E> {
         }
 
         self.elements.insert(index, elem);
-        self.elements
-            .sort_by(|e1, e2| e1.element.z_index().cmp(&e2.element.z_index()));
+        self.elements.sort_by_key(|e1| e1.element.z_index());
     }
 
     /// Changes the location of an already-mapped [`SpaceElement`] in this space
@@ -263,7 +262,7 @@ impl<E: SpaceElement + PartialEq> Space<E> {
     pub fn elements_for_output<'output>(
         &'output self,
         output: &'output Output,
-    ) -> impl DoubleEndedIterator<Item = &'output E> {
+    ) -> impl DoubleEndedIterator<Item = &'output E> + use<'output, E> {
         self.elements
             .iter()
             .filter(|e| e.outputs.contains_key(output))
@@ -437,8 +436,16 @@ impl<E: SpaceElement + PartialEq> Space<E> {
             })
             .collect::<Vec<_>>();
         for e in &mut self.elements {
-            let bbox = e.bbox();
+            e.outputs.retain(|output, _| {
+                if !outputs.iter().any(|(o, _)| o == output) {
+                    e.element.output_leave(output);
+                    false
+                } else {
+                    true
+                }
+            });
 
+            let bbox = e.bbox();
             for (output, output_geometry) in &outputs {
                 // Check if the bounding box of the toplevel intersects with the output
                 if let Some(mut overlap) = output_geometry.intersection(bbox) {
@@ -452,14 +459,6 @@ impl<E: SpaceElement + PartialEq> Space<E> {
                     e.element.output_leave(output);
                 }
             }
-            e.outputs.retain(|output, _| {
-                if !outputs.iter().any(|(o, _)| o == output) {
-                    e.element.output_leave(output);
-                    false
-                } else {
-                    true
-                }
-            });
         }
 
         self.elements.iter().for_each(|e| e.element.refresh());
@@ -633,10 +632,10 @@ crate::backend::renderer::element::render_elements! {
 }
 
 impl<
-        #[cfg(feature = "wayland_frontend")] R: Renderer + ImportAll,
-        #[cfg(not(feature = "wayland_frontend"))] R: Renderer,
-        E: RenderElement<R> + std::fmt::Debug,
-    > std::fmt::Debug for SpaceRenderElements<R, E>
+    #[cfg(feature = "wayland_frontend")] R: Renderer + ImportAll,
+    #[cfg(not(feature = "wayland_frontend"))] R: Renderer,
+    E: RenderElement<R> + std::fmt::Debug,
+> std::fmt::Debug for SpaceRenderElements<R, E>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

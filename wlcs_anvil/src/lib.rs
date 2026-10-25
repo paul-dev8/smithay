@@ -13,21 +13,21 @@ use std::{
 use smithay::{
     reexports::calloop::{
         self,
-        channel::{channel, Sender},
+        channel::{Sender, channel},
     },
     utils::{Logical, Point},
 };
 
 use wayland_sys::{
-    client::{wl_display, wl_display_get_fd, wl_proxy, wl_proxy_get_id},
+    client::*,
     common::{wl_fixed_t, wl_fixed_to_double},
     ffi_dispatch,
 };
 use wlcs::{
-    extension_list,
+    Wlcs, extension_list,
     ffi_display_server_api::{WlcsExtensionDescriptor, WlcsIntegrationDescriptor, WlcsServerIntegration},
     ffi_wrappers::wlcs_server,
-    wlcs_server_integration, Wlcs,
+    wlcs_server_integration,
 };
 
 wlcs_server_integration!(AnvilDisplayServerHandle);
@@ -159,8 +159,8 @@ impl Wlcs for AnvilDisplayServerHandle {
     }
 
     fn position_window_absolute(&self, display: *mut wl_display, surface: *mut wl_proxy, x: i32, y: i32) {
-        let client_id = unsafe { ffi_dispatch!(WAYLAND_CLIENT_HANDLE, wl_display_get_fd, display) };
-        let surface_id = unsafe { ffi_dispatch!(WAYLAND_CLIENT_HANDLE, wl_proxy_get_id, surface) };
+        let client_id = unsafe { ffi_dispatch!(wayland_client_handle(), wl_display_get_fd, display) };
+        let surface_id = unsafe { ffi_dispatch!(wayland_client_handle(), wl_proxy_get_id, surface) };
         if let Some((ref sender, _)) = self.server {
             let _ = sender.send(WlcsEvent::PositionWindow {
                 client_id,

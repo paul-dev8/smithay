@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use drm::control::{connector, Device as ControlDevice};
+use drm::control::{Device as ControlDevice, connector};
 
 /// Responsible for tracking connected/disconnected events.
 ///
@@ -12,7 +12,7 @@ use drm::control::{connector, Device as ControlDevice};
 ///
 /// let mut scanner = ConnectorScanner::new();
 ///
-/// for event in scanner.scan(&drm_device) {
+/// for event in scanner.scan(&drm_device).expect("failed to scan connectors") {
 ///     match event {
 ///         ConnectorScanEvent::Connected(conn) => {},
 ///         ConnectorScanEvent::Disconnected(conn) => {},

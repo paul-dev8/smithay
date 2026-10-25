@@ -84,7 +84,7 @@ impl ::std::error::Error for EglExtensionNotSupportedError {}
 pub unsafe fn get_proc_address(symbol: &str) -> *const c_void {
     let addr = CString::new(symbol.as_bytes()).unwrap();
     let addr = addr.as_ptr();
-    ffi::egl::GetProcAddress(addr) as *const _
+    unsafe { ffi::egl::GetProcAddress(addr) as *const _ }
 }
 
 /// Error that can occur when accessing an EGL buffer
@@ -260,7 +260,7 @@ impl EGLBuffer {
 
     /// Returns the underlying images
     pub fn into_images(mut self) -> Vec<EGLImage> {
-        self.images.drain(..).collect()
+        std::mem::take(&mut self.images)
     }
 }
 

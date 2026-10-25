@@ -1,3 +1,5 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 //! Integration for using [`glow`] on top of smithays OpenGL ES 2 renderer
 use tracing::warn;
 
@@ -11,16 +13,17 @@ use crate::backend::renderer::{ImportDmaWl, ImportMemWl};
 use crate::backend::{egl::display::EGLBufferReader, renderer::ImportEgl};
 use crate::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::FormatSet, Format, Fourcc},
+        allocator::{Format, Fourcc, dmabuf::Dmabuf, format::FormatSet},
         egl::EGLContext,
         renderer::{
+            Bind, Blit, BlitFrame, Color32F, DebugFlags, ExportMem, ImportDma, ImportMem, Offscreen,
+            Renderer, RendererSuper, TextureFilter,
             element::UnderlyingStorage,
             gles::{element::*, *},
-            sync, Bind, Blit, BlitFrame, Color32F, DebugFlags, ExportMem, ImportDma, ImportMem, Offscreen,
-            Renderer, RendererSuper, TextureFilter,
+            sync,
         },
     },
-    utils::{user_data::UserDataMap, Buffer as BufferCoord, Physical, Rectangle, Size, Transform},
+    utils::{Buffer as BufferCoord, Physical, Rectangle, Size, Transform, user_data::UserDataMap},
 };
 
 #[cfg(feature = "wayland_frontend")]
@@ -32,7 +35,7 @@ use std::{
     sync::Arc,
 };
 
-use super::{element::RenderElement, ContextId, Frame, FrameContext};
+use super::{ContextId, Frame, FrameContext, element::RenderElement};
 
 #[derive(Debug)]
 /// A renderer utilizing OpenGL ES 2 and [`glow`] on top for easier custom rendering.
@@ -279,6 +282,11 @@ impl Renderer for GlowRenderer {
     #[profiling::function]
     fn cleanup_texture_cache(&mut self) -> Result<(), Self::Error> {
         self.gl.as_mut().cleanup_texture_cache()
+    }
+
+    #[profiling::function]
+    fn invalidate_caches(&mut self) -> Result<(), Self::Error> {
+        self.gl.as_mut().invalidate_caches()
     }
 }
 
@@ -594,7 +602,7 @@ impl<'buffer> BlitFrame<GlesTarget<'buffer>> for GlowFrame<'_, 'buffer> {
         src: Rectangle<i32, Physical>,
         dst: Rectangle<i32, Physical>,
         filter: TextureFilter,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<sync::SyncPoint, Self::Error> {
         self.frame.as_mut().unwrap().blit_to(to, src, dst, filter)
     }
 
@@ -604,7 +612,7 @@ impl<'buffer> BlitFrame<GlesTarget<'buffer>> for GlowFrame<'_, 'buffer> {
         src: Rectangle<i32, Physical>,
         dst: Rectangle<i32, Physical>,
         filter: TextureFilter,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<sync::SyncPoint, Self::Error> {
         self.frame.as_mut().unwrap().blit_from(from, src, dst, filter)
     }
 }

@@ -1,10 +1,10 @@
 use crate::{
     backend::renderer::utils::RendererSurfaceStateUserData,
-    desktop::{utils::*, PopupManager},
+    desktop::{PopupManager, utils::*},
     output::{Output, WeakOutput},
-    utils::{user_data::UserDataMap, IsAlive, Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Size, user_data::UserDataMap},
     wayland::{
-        compositor::{with_states, with_surface_tree_downward, SurfaceData, TraversalAction},
+        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
         dmabuf::DmabufFeedback,
         seat::WaylandFocus,
         shell::wlr_layer::{
@@ -44,7 +44,7 @@ pub struct LayerMap {
 /// to the output and returned on subsequent calls.
 ///
 /// Note: This function internally uses a [`Mutex`] per
-/// [`Output`] as exposed by its return type. Therefor
+/// [`Output`] as exposed by its return type. Therefore
 /// trying to hold on to multiple references of a [`LayerMap`]
 /// of the same output using this function *will* result in a deadlock.
 pub fn layer_map_for_output(o: &Output) -> MutexGuard<'_, LayerMap> {

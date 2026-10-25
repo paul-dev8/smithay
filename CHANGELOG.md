@@ -4,6 +4,20 @@
 
 ### Breaking changes
 
+`wayland::virtual_keyboard` no longer sends key events to focused clients on its
+own. A virtual keyboard is now an regular input device:
+`VirtualKeyboardManagerState::new` requires the state to implement the new
+`VirtualKeyboardHandler`, which receives `InputEvent<VirtualKeyboardBackend>`s
+for the compositor to handle like real devices (so special keys, compositor
+bindings, idle handling and focus works properly). The compositor has to
+activate the device's keymap (`VirtualKeyboardDevice::keymap`) before processing
+its key events. Modifiers set with the `modifiers` request are not reset when
+the device is destroyed (the masks are absolute, so that would also clear state
+not set by the device, like locks set by other devices on a shared keymap). The
+compositor is responsible for reconciling the modifier state on `DeviceRemoved`
+(e.g., by tracking the bits set by it). `VirtualKeyboardUserData` is no longer
+generic over the state type.
+
 `crate::wayland::selection::data_device::start_dnd` was removed in favor of exposing the
 underlying `DnDGrab` and associated types to make it possible to write external Drag&Drop sources
 and targets (e.g. for other shell implementations). See the `Additions`-section for more info.
@@ -103,7 +117,65 @@ The following methods are no longer needed as Smithay does them automatically no
 
 You also no longer need to manually set `LayerSurfaceAttributes::initial_configure_sent`, Smithay handles it automatically.
 
+The `delegate_*!` macros have been replaced with a single `delegate_dispatch2!` macro, which implements dispatch in terms
+of new `Dipsatch2` and `GlobalDispatch2` traits. These will replace `Dispatch` and `GlobalDispatch` in a future version of
+`wayland_server`.
+
+The `SpaceElement::geometry` impl for `X11Surface` is no longer equivalent to its bbox.  For clients that set
+`_GTK_FRAME_EXTENTS`, the shadow extents are subtracted from the bbox to give the geometry.
+
+`X11Surface::geometry` has been renamed to `X11Surface::last_configure`. `X11Surface::geometry` now returns the bounding
+box minus the surface's frame extents.
+
+`SessionLockHandler::unlock` will no longer be called if the `ext_session_lock_v1` instance that sent the
+`unlock_and_destroy` request is not the same instance as the one that successfully locked the session.
+
+`SessionLockHandler::new_surface` can be called for multiple `SessionLocker` instances that could be in-flight at the same
+time. `LockSurface::ext_session_lock` has been added to allow the compositor to disambiguate, and associate lock surfaces
+with the correct lock instance.
+
+`backend::input` and `input` now use `backend::input::InputTime` for timestamps instead of `u32` or `u64`. `InputTime::now()`
+is used for timestamps for synthesized events.
+
+`TextInputActivation` must be implemented. It allows for hooks to be run when a text input is `activated` and `deactivated`.
+
+`KeyboardHandle::input_intercept()` now has a `source` argument and early-returns `None` when the key was already pressed/released, matching the behavior of `KeyboardHandle::input()`.
+
+```diff
+-let (res, mods_changed) = keyboard.input_intercept(data, keycode, state, filter);
++let Some((res, mods_changed)) = keyboard.input_intercept(
++    KeyboardSource::MAIN,
++    data,
++    keycode,
++    state,
++    filter,
++) else {
++    return;
++};
+```
+
 ### Additions
+
+- Add `WmWindowProperty::Other` to forward unrecognized X11 property changes to the compositor.
+
+
+- The wlr virtual pointer protocol is now available in `smithay::wayland::virtual_pointer`.
+
+- `Xkb::keymap_as_string` returns the active keymap as `XKB_KEYMAP_FORMAT_TEXT_V1`.
+
+- `XkbContext::set_modifier_mask` applies raw xkb modifier masks to a keyboard
+  for clients that report modifier state directly instead of through key presses
+  (e.g., `zwp_virtual_keyboard_v1.modifiers`).
+
+- `KeyboardHandle::input_forward_bypassing_grab` sends a key skipping the active
+  grab, which can be used by compositors to prevent infinite loops when a client
+  with a grab forwards a key through its own virtual keyboard, which can be
+  tracked with `InputMethodHandle::keyboard_grab_client` and
+  `VirtualKeyboardDevice::client`.
+
+- `VirtualKeyboardDevice::source` gives each virtual keyboard its own
+  `KeyboardSource` so keys pressed on multiple devices are released when the
+  last one is released.
 
 - ExtBackgroundEffect protocol is now available in `smithay::wayland::background_effect` module.
 
@@ -116,10 +188,20 @@ operations (see below).
 types, which can be targets of DnD operations. `Source` is a new trait for types that represent
 sources of data for DnD operations.
 
+`Source::accepted` is called when a target accepts a mime-type, or rejects the offer with `None`.
+Sources that proxy an upstream offer need it: a nested compositor forwarding a drag to its own
+clients only receives `drop` from the host compositor once it has itself accepted on the upstream
+offer, and previously had no way to know when a nested client had done so. It has a default no-op
+implementation, so sources that originate their own data are unaffected.
+
 The Xwayland WM can now handle XDND operations and bridge them over to the new generic DnD interface
 allowing DnD operations between X11 and Wayland clients (both directions).
 
 `X11Surface` now has a new `surface_under`-method, which is also internally used by `SpaceElement::is_in_input_region` and `crate::desktop::Window::surface_under`. Any direct usage of `under_from_surface_tree` on the underlying `wl_surface` of an `X11Surface` should be replaced with this method for XDND to work correctly.
+
+`X11Surface` now parses and exposes the Motif WM hints via `motif_hints()`.
+
+`X11Wm` allows you to remove and clear XSETTINGS settings.
 
 xdg_shell and layer_shell now enforce the client acking a configure before committing a buffer, as required by the protocols.
 
@@ -191,6 +273,70 @@ default implementations, which result in skipping the new functionality. As such
 - `raise_element_above()`: same as above, but moves an already-mapped element.
 - `lower_element()`: lowers an element to the bottom of the stack, respecting its z-index group.
 - `relocate_element()`: moves an element to a new location in the space without changing the stacking order.
+
+`Output` now has `owns_xdg_output()` which allows you to match an XDG output protocol object with an `Output`.
+
+Added `Renderer::invalidate_caches`, which unconditionally drops all renderer-internal caches,
+including entries `Renderer::cleanup_texture_cache` retains while their source buffers are still
+alive.
+
+Added `GpuManager::cleanup_texture_cache` and `GpuManager::invalidate_caches`, which apply the
+corresponding `Renderer` method to every enumerated device. `GpuManager::invalidate_caches`
+additionally drops the buffers cached for copying between a render and a target node, which no
+`Renderer` owns.
+
+### Bugfixes
+
+`ForeignToplevelListState::remove_toplevel` no longer removes a different toplevel from the list when
+a handle in front of it was dropped without being removed (the lazy cleanup that the documentation
+allows). Previously the removed entry was picked by its position among the live handles, so a live
+toplevel could be dropped from the list and was then not announced to clients binding the global later.
+
+`input_method_v2`: a second input method binding a seat that already has one is now the object told
+it is `unavailable`, per the protocol, leaving the existing instance in place. Previously the event
+went to the existing instance and the newcomer was dropped untracked. Destroying such an inert
+newcomer no longer clears the active instance, and its requests no longer drive the seat.
+
+`DrmSurface::use_vrr(false)` now succeeds as a no-op when using legacy DRM. Attempts to enable VRR
+on legacy DRM still return `UnknownProperty`.
+
+The `xdg_toplevel` request handler now posts an `invalid_size` error when a client performs a `set_max_size` or `set_min_size` request with a negative width or height.
+
+`DrmDeviceFd::new` no longer tries to become DRM master on a render node, which the kernel always
+refuses, so it no longer warns about it.
+
+`SimpleCrtcMapper` (in `smithay-drm-extras`) now releases the CRTC reservation of any connector that
+is no longer connected, including connectors that have disappeared from the resource list entirely
+rather than being reported as disconnected. Previously such connectors (for example DP-MST sink
+connectors when a dock is unplugged, or across suspend/resume) leaked their CRTC reservation
+indefinitely, which could accumulate until a newly connected output could no longer be assigned a
+CRTC.
+
+XWayland now honors WM_HINTS request to map the window in IconicState(minimized). Compositors should
+check X11Surface::is_hidden() at mapping time and minimize the window appropriately.
+
+Space::refresh() now clears stale outputs before emitting any enter events so no wl_surface.enter events
+are emitted with a stale wl_output anymore.
+
+The XWayland WM implementation previously incorrectly prefixed large transfers from X11 windows with
+the four INCR bytes.
+
+`MultiRenderer::cleanup_texture_cache` now also cleans up the devices other than the render and
+target device. Buffers that cannot be imported on the render node directly are imported on their
+source device, so those devices accumulate cached imports that previously were never released.
+Cleanup is now also attempted on every device even if it fails on one of them, with every failure
+logged and the first error returned.
+
+`send_frames_surface_tree` (and `Window::send_frame`, `LayerSurface::send_frame`) no longer sends frame
+callbacks to surfaces whose renderer state has no buffer, or to their subsurfaces.
+
+`GlesRenderer::cleanup_texture_cache` and `GlesRenderer::invalidate_caches` now only make their EGL
+context current when resources are queued for destruction. This avoids waking idle GPUs and
+blocking the compositor while they resume.
+
+`ext_image_copy_capture_session_v1` now raises the `duplicate_frame` protocol error when a client
+calls `create_frame` while the session still has an active frame, as the protocol requires. Previously
+the request was accepted and the extra frame was silently added to the session.
 
 ## 0.7.0
 

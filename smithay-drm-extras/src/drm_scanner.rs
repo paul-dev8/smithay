@@ -13,7 +13,7 @@
 //!
 //! let mut scanner: DrmScanner = DrmScanner::new();
 //!
-//! for event in scanner.scan_connectors(&drm_device) {
+//! for event in scanner.scan_connectors(&drm_device).expect("failed to scan connectors") {
 //!     match event {
 //!         DrmScanEvent::Connected { .. } => {},
 //!         DrmScanEvent::Disconnected { .. } => {},
@@ -23,7 +23,7 @@
 //! ```
 use std::collections::HashMap;
 
-use drm::control::{connector, crtc, Device as ControlDevice};
+use drm::control::{Device as ControlDevice, connector, crtc};
 
 mod connector_scanner;
 pub use connector_scanner::{ConnectorScanEvent, ConnectorScanResult, ConnectorScanner};

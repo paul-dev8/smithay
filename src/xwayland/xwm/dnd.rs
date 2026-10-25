@@ -5,19 +5,20 @@ use std::{
     fmt,
     os::fd::OwnedFd,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex, Weak,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
-use atomic_float::AtomicF64;
 use calloop::LoopHandle;
+use portable_atomic::AtomicF64;
 use rustix::fs::OFlags;
 use smallvec::SmallVec;
 use tracing::{debug, trace, warn};
 #[cfg(feature = "wayland_frontend")]
 use wayland_server::DisplayHandle;
 use x11rb::{
+    CURRENT_TIME,
     connection::Connection as _,
     errors::{ConnectionError, ReplyOrIdError},
     protocol::{
@@ -29,19 +30,19 @@ use x11rb::{
     },
     rust_connection::RustConnection,
     wrapper::ConnectionExt as _,
-    CURRENT_TIME,
 };
 
 use crate::{
+    backend::input::InputTime,
     input::{
+        Seat, SeatHandler,
         dnd::{DnDGrab, DndAction, DndFocus, DndGrabHandler, OfferData, Source, SourceMetadata},
         pointer::Focus,
-        Seat, SeatHandler,
     },
     utils::{IsAlive, Logical, Point, Serial},
     xwayland::{
-        xwm::{atom_from_mime, mime_from_atom, selection::XWmSelection, Atoms, OwnedX11Window, XwmId},
         X11Surface, XwmHandler,
+        xwm::{Atoms, OwnedX11Window, XwmId, atom_from_mime, mime_from_atom, selection::XWmSelection},
     },
 };
 
@@ -339,7 +340,7 @@ impl XWmDnd {
                     .take()
                     .or(pos_update.then_some(offer_state.last_pos))
                 {
-                    let location = (window.geometry().loc + pos.to_i32_round())
+                    let location = (window.last_configure().loc + pos.to_i32_round())
                         .to_client_precise_round::<_, i32>(client_scale.load(Ordering::Acquire));
 
                     let data = [
@@ -1068,7 +1069,7 @@ impl<D: XwmHandler + SeatHandler> DndFocus<D> for X11Surface {
                 source: offer.source.clone(),
             });
 
-            DndFocus::motion(self, data, Some(&mut offer), seat, location, 0);
+            DndFocus::motion(self, data, Some(&mut offer), seat, location, InputTime::now());
             Some(offer)
         }
     }
@@ -1079,7 +1080,7 @@ impl<D: XwmHandler + SeatHandler> DndFocus<D> for X11Surface {
         offer: Option<&mut XwmOfferData<S>>,
         _seat: &Seat<D>,
         location: Point<f64, Logical>,
-        _time: u32,
+        _time: InputTime,
     ) {
         let Some(offer) = offer else { return };
         let mut state = offer.state.lock().unwrap();
@@ -1098,7 +1099,7 @@ impl<D: XwmHandler + SeatHandler> DndFocus<D> for X11Surface {
 
         let Some(xwm_id) = self.xwm_id() else { return };
         let xwm = data.xwm_state(xwm_id);
-        let location = (self.geometry().loc + location.to_i32_round())
+        let location = (self.last_configure().loc + location.to_i32_round())
             .to_client_precise_round::<_, i32>(xwm.client_scale.load(Ordering::Acquire));
 
         let data = [

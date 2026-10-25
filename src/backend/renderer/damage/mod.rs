@@ -100,20 +100,20 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use tracing::{info_span, instrument, trace, warn};
 
 use crate::{
-    backend::renderer::{element::RenderElementPresentationState, Frame},
+    backend::renderer::{Frame, element::RenderElementPresentationState},
     output::{Output, OutputModeSource, OutputNoMode},
-    utils::{user_data::UserDataMap, Buffer as BufferCoords, Physical, Rectangle, Scale, Size, Transform},
+    utils::{Buffer as BufferCoords, Physical, Rectangle, Scale, Size, Transform, user_data::UserDataMap},
 };
 
 use super::{
+    Color32F,
     element::{Element, Id, RenderElement, RenderElementState, RenderElementStates},
     sync::SyncPoint,
     utils::CommitCounter,
-    Color32F,
 };
 
 use super::{Renderer, Texture};
@@ -278,7 +278,7 @@ impl OutputDamageTracker {
     /// next call to [`render_output`](OutputDamageTracker::render_output)
     pub fn from_output(output: &Output) -> Self {
         Self {
-            mode: OutputModeSource::Auto(output.clone()),
+            mode: OutputModeSource::Auto(output.downgrade()),
             damage_shaper: Default::default(),
             damage: Default::default(),
             element_damage: Default::default(),
@@ -659,7 +659,7 @@ impl OutputDamageTracker {
         element_damage.extend_from_slice(&self.last_state.opaque_regions);
         element_damage =
             Rectangle::subtract_rects_many_in_place(element_damage, self.opaque_regions.iter().copied());
-        if !element_damage.is_empty() {
+        if element_damage.iter().any(|rect| !rect.is_empty()) {
             force_effect_redraw = true;
         }
         self.damage.extend_from_slice(&element_damage);
@@ -690,6 +690,7 @@ impl OutputDamageTracker {
         for (z_index, element) in render_elements
             .iter()
             .enumerate()
+            .rev()
             .filter(|(_, e)| e.is_framebuffer_effect())
         {
             let damage_index = if force_effect_redraw {
@@ -863,8 +864,7 @@ impl OutputDamageTracker {
 
         trace!(
             "rendering with damage {:?} and opaque regions {:?}",
-            self.damage,
-            self.opaque_regions
+            self.damage, self.opaque_regions
         );
 
         let render_res = (|| {
@@ -907,8 +907,7 @@ impl OutputDamageTracker {
                 if element_damage.is_empty() {
                     trace!(
                         "skipping rendering element {:?} with geometry {:?}, no damage",
-                        element_id,
-                        element_geometry
+                        element_id, element_geometry
                     );
                     continue;
                 }
@@ -926,9 +925,7 @@ impl OutputDamageTracker {
 
                 trace!(
                     "rendering element {:?} with geometry {:?} and damage {:?}",
-                    element_id,
-                    element_geometry,
-                    element_damage,
+                    element_id, element_geometry, element_damage,
                 );
 
                 let element_src = element.src();

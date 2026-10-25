@@ -69,15 +69,15 @@ use wayland_server::protocol::wl_surface;
 
 use crate::{
     backend::renderer::{
+        Color32F, Frame, ImportAll, Renderer, Texture,
         utils::{
             Buffer, DamageSet, DamageSnapshot, OpaqueRegions, RendererSurfaceState,
             RendererSurfaceStateUserData, SurfaceView,
         },
-        Color32F, Frame, ImportAll, Renderer, Texture,
     },
     utils::{
-        user_data::UserDataMap, Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size,
-        Transform,
+        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size, Transform,
+        user_data::UserDataMap,
     },
     wayland::{
         alpha_modifier::AlphaModifierSurfaceCachedState,
@@ -343,6 +343,11 @@ impl<R: Renderer + ImportAll> WaylandSurfaceRenderElement<R> {
     /// Get the buffer texture
     pub fn texture(&self) -> &WaylandSurfaceTexture<R> {
         &self.texture
+    }
+
+    /// Get the buffer
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
     }
 }
 
