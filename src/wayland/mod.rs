@@ -93,6 +93,8 @@ pub mod virtual_pointer;
 pub mod xdg_activation;
 pub mod xdg_foreign;
 pub mod xdg_system_bell;
+// athena local change: our xdg-toplevel-drag-v1 (Chrome tab tear-off); not upstream.
+pub mod xdg_toplevel_drag;
 pub mod xdg_toplevel_icon;
 pub mod xdg_toplevel_tag;
 #[cfg(feature = "xwayland")]

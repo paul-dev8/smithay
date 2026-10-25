@@ -145,6 +145,20 @@ where
                 debug!(serial = ?serial, client = ?client, "denying drag from client without implicit grab");
             }
             wl_data_device::Request::SetSelection { source, .. } => {
+                // athena local change: xdg-toplevel-drag-v1 rejects sources tagged for
+                // toplevel drag. "Attempting to use the source other than for drag-and-drop
+                // such as in wl_data_device.set_selection will raise an invalid_source error."
+                // The error belongs on the drag manager, which this request cannot reach, so
+                // the request is refused and logged.
+                if let Some(src_data) = source.as_ref().and_then(|src| src.data::<super::DataSourceUserData>()) {
+                    if src_data
+                        .toplevel_drag_source
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        debug!("Rejecting set_selection: data_source is tagged for xdg_toplevel_drag");
+                        return;
+                    }
+                }
                 let seat_data = match seat.get_keyboard() {
                     Some(keyboard) if keyboard.client_of_object_has_focus(&resource.id()) => seat
                         .user_data()

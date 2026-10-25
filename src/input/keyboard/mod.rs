@@ -346,11 +346,14 @@ impl<D: SeatHandler + 'static> KbdInternal<D> {
         // Offset the keycode by 8, as the evdev XKB rules reflect X's
         // broken keycode system, which starts at 8.
         let mut xkb = self.xkb.lock().unwrap();
-        let state_components = xkb.state.update_key(keycode, direction);
-        let modifiers_changed = state_components != 0;
-        if modifiers_changed {
-            self.mods_state.update_with(&xkb.state);
-        }
+        // athena local change: don't trust update_key()'s return value for modifier change
+        // detection. xkbcommon can return 0 for a modifier key release even though the
+        // effective modifier state changed (e.g. Shift release). Read the actual state and
+        // compare instead.
+        let _state_components = xkb.state.update_key(keycode, direction);
+        let old_mods = self.mods_state;
+        self.mods_state.update_with(&xkb.state);
+        let modifiers_changed = self.mods_state != old_mods;
         let leds_changed = self.led_state.update_with(&xkb.state, &self.led_mapping);
         (modifiers_changed, leds_changed, true)
     }
@@ -1270,6 +1273,38 @@ impl<D: SeatHandler + 'static> KeyboardHandle<D> {
         guard.pressed_keys.clone()
     }
 
+    /// Release all tracked pressed keys and reset modifier/xkb state to "nothing held".
+    ///
+    /// Use this to recover from stuck keys — e.g. after the system was under heavy memory
+    /// pressure and the kernel dropped input events (SYN_DROPPED), leaving phantom entries
+    /// in `pressed_keys` that prevent normal keyboard operation.
+    ///
+    /// This synthesizes xkb key-release events for every tracked key, clears
+    /// `pressed_keys`, `key_sources` and `forwarded_pressed_keys`, and updates the modifier
+    /// state. The caller should follow up with a `set_focus` or send a `modifiers` event to
+    /// resync the focused client.
+    // athena local change: stuck-key recovery; not upstream.
+    pub fn clear_pressed_keys(&self) {
+        let mut guard = self.arc.internal.lock().unwrap();
+        let keys: Vec<Keycode> = guard.pressed_keys.drain().collect();
+        guard.key_sources.clear();
+        guard.forwarded_pressed_keys.clear();
+        // Clone the Arc so we can release the immutable borrow on guard before
+        // mutating mods_state and led_state.
+        let xkb_arc = guard.xkb.clone();
+        let mut xkb = xkb_arc.lock().unwrap();
+        for keycode in &keys {
+            xkb.state.update_key(*keycode, xkb::KeyDirection::Up);
+        }
+        guard.mods_state.update_with(&xkb.state);
+        let led_mapping = guard.led_mapping;
+        guard.led_state.update_with(&xkb.state, &led_mapping);
+        drop(xkb);
+        if !keys.is_empty() {
+            tracing::info!("Cleared {} phantom pressed keys", keys.len());
+        }
+    }
+
     /// Iterate over the keysyms of the currently pressed keys.
     pub fn with_pressed_keysyms<F, R>(&self, f: F) -> R
     where
@@ -1689,7 +1724,13 @@ impl<D: SeatHandler + 'static> KeyboardInnerHandle<'_, D> {
             let old_focus = self.inner.focus.replace((focus.clone(), serial));
             match (focus, old_focus) {
                 (focus, Some((old_focus, _))) if focus == old_focus => {
-                    trace!("Focus unchanged");
+                    // athena local change: focus unchanged — still resync modifier state with
+                    // the client. If a modifier release was lost (e.g. under memory pressure /
+                    // SYN_DROPPED), the client's modifier state may be stale. Sending modifiers
+                    // here means clicking the focused window always recovers from stuck
+                    // modifiers.
+                    focus.modifiers(self.seat, data, self.inner.mods_state, serial);
+                    trace!("Focus unchanged, modifiers resynced");
                 }
                 (focus, Some((old_focus, _))) => {
                     trace!("Focus set to new surface");
